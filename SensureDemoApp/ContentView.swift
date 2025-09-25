@@ -10,10 +10,11 @@ import AVKit
 import AVFoundation
 import CoreHaptics
 import UniformTypeIdentifiers
+import PhotosUI
 
 struct ContentView: View {
     @StateObject private var viewModel = TactileVideoViewModel()
-    @State private var showingVideoPicker = false
+    @State private var selectedPhotoPickerItem: PhotosPickerItem?
 
     var body: some View {
         VStack(spacing: 20) {
@@ -49,15 +50,15 @@ struct ContentView: View {
             .disabled(!viewModel.isPlayerReady)
 
             HStack(spacing: 12) {
-                Button("Upload Video") {
-                    showingVideoPicker = true
+                PhotosPicker(selection: $selectedPhotoPickerItem, matching: .videos) {
+                    Text("Upload Video")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .font(.headline)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.blue)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Button("Revert to Default") {
                     viewModel.revertToDefaultVideo()
@@ -78,18 +79,17 @@ struct ContentView: View {
             viewModel.cleanup()
         }
         .background(Color(.systemGroupedBackground))
-        .fileImporter(
-            isPresented: $showingVideoPicker,
-            allowedContentTypes: [.movie],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    viewModel.loadCustomVideo(from: url)
+        .onChange(of: selectedPhotoPickerItem) { _, newItem in
+            guard let newItem else { return }
+
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self) {
+                    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("selected_video.mov")
+                    try? data.write(to: tempURL)
+                    await MainActor.run {
+                        viewModel.loadCustomVideo(from: tempURL)
+                    }
                 }
-            case .failure(let error):
-                print("Video picker error: \(error)")
             }
         }
     }
