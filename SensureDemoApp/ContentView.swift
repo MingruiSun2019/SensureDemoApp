@@ -9,9 +9,11 @@ import SwiftUI
 import AVKit
 import AVFoundation
 import CoreHaptics
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var viewModel = TactileVideoViewModel()
+    @State private var showingVideoPicker = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -45,6 +47,28 @@ struct ContentView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .disabled(!viewModel.isPlayerReady)
+
+            HStack(spacing: 12) {
+                Button("Upload Video") {
+                    showingVideoPicker = true
+                }
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Color.blue)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                Button("Revert to Default") {
+                    viewModel.revertToDefaultVideo()
+                }
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Color.orange)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
         .padding(24)
         .onAppear {
@@ -54,6 +78,20 @@ struct ContentView: View {
             viewModel.cleanup()
         }
         .background(Color(.systemGroupedBackground))
+        .fileImporter(
+            isPresented: $showingVideoPicker,
+            allowedContentTypes: [.movie],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    viewModel.loadCustomVideo(from: url)
+                }
+            case .failure(let error):
+                print("Video picker error: \(error)")
+            }
+        }
     }
 }
 
@@ -153,6 +191,9 @@ final class TactileVideoViewModel: ObservableObject {
     @Published var didFinishPlaying = false
     @Published var isPlayerReady = false
 
+    private var customVideoURL: URL?
+    private var isUsingCustomVideo = false
+
     private var timeObserver: Any?
     private var endObserver: Any?
     private var wasPlayingBeforeScrub = false
@@ -183,13 +224,20 @@ final class TactileVideoViewModel: ObservableObject {
         guard !setupPerformed else { return }
         setupPerformed = true
 
-        guard let url = Bundle.main.url(forResource: "demo_video_1", withExtension: "mp4") else {
+        let url: URL?
+        if isUsingCustomVideo, let customURL = customVideoURL {
+            url = customURL
+        } else {
+            url = Bundle.main.url(forResource: "demo_video_1", withExtension: "mp4")
+        }
+
+        guard let videoURL = url else {
             return
         }
 
         configureAudioSession()
 
-        let asset = AVAsset(url: url)
+        let asset = AVAsset(url: videoURL)
         asset.loadValuesAsynchronously(forKeys: ["duration", "tracks"]) { [weak self] in
             guard let self else { return }
 
@@ -277,6 +325,31 @@ final class TactileVideoViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func loadCustomVideo(from url: URL) {
+        customVideoURL = url
+        isUsingCustomVideo = true
+        resetPlayerState()
+        setupPerformed = false
+        setup()
+    }
+
+    func revertToDefaultVideo() {
+        customVideoURL = nil
+        isUsingCustomVideo = false
+        resetPlayerState()
+        setupPerformed = false
+        setup()
+    }
+
+    private func resetPlayerState() {
+        cleanup()
+        currentTime = 0
+        duration = 1
+        didFinishPlaying = false
+        isPlayerReady = false
+        displayWaveformSamples = PseudoWaveformGenerator.samples(count: 180)
     }
 
     private func play() {
